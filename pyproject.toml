@@ -1,24 +1,31 @@
-[tool.poetry]
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
 name = "py-seas"
 version = "0.1.0"
 description = "Seasonal adjustment using Genhol in R."
-authors = ["Your Name <lfpazevedo@gmail.com>"]
-license = "MIT"
-packages = [{ include = "src" }]
+authors = [{ name = "Your Name", email = "lfpazevedo@gmail.com" }]
+license = { text = "MIT" }
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent"
+]
+dependencies = [
+    "requests==2.32.3",
+    "pandas==2.2.3",
+    "rpy2==3.5.17",
+    "python-dotenv==1.0.1",
+    "xlrd==2.0.1",
+    "matplotlib==3.9.3",
+    "statsmodels==0.14.4",
+    "pytest==7.0.0"
+]
 
-[tool.poetry.dependencies]
-python = "^3.10"
-requests = "2.32.3"
-pandas = "2.2.3"
-rpy2 = "3.5.17"
-python-dotenv = "1.0.1"
-xlrd = "2.0.1"
-matplotlib = "3.9.3"
-statsmodels = "0.14.4"
-
-[tool.poetry.dev-dependencies]
-pytest = "7.0.0"
-
-[build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
+[project.optional-dependencies]
+dev = [
+    "pytest==7.0.0"
+]
