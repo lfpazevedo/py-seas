@@ -1,163 +1,78 @@
-import pandas as pd
-from rpy2.robjects.packages import importr
-from rpy2.robjects.vectors import StrVector
-
 import os
 import requests
 import tempfile
 import pandas as pd
+from rpy2.robjects.packages import importr
+from rpy2.robjects.vectors import StrVector
 from datetime import datetime
 from dotenv import load_dotenv
 
+# Load R packages
+utils = importr('utils')
+base = importr('base')
+seasonal = importr('seasonal')
 
-def load_environment_variables():
-    """Loads environment variables from a .env file."""
-    load_dotenv()
-    os.environ["X13_PATH"] = os.getenv("X13_PATH")
+# Load environment variables
+load_dotenv()
+os.environ["X13_PATH"] = os.getenv("X13_PATH")
 
-
-def download_holiday_data(url):
-    """Downloads the holiday data from the specified URL and saves it to a temporary file.
-
-    Args:
-        url (str): The URL to download the data from.
-
-    Returns:
-        str: The path to the temporary file containing the downloaded data.
-    """
+def fetch_holiday_data(url: str) -> pd.DataFrame:
+    """Fetch holiday data from a URL and return as a DataFrame."""
     response = requests.get(url)
-    response.raise_for_status()
     with tempfile.NamedTemporaryFile(suffix=".xls", delete=False) as tmp:
         tmp.write(response.content)
-        return tmp.name
+        tmp_path = tmp.name
+    return pd.read_excel(tmp_path, header=0)
 
-
-def load_and_clean_data(file_path):
-    """Loads and cleans the holiday data from the specified file.
-
-    Args:
-        file_path (str): The path to the file containing the holiday data.
-
-    Returns:
-        pd.DataFrame: A cleaned DataFrame containing the holiday data.
-    """
-    df = pd.read_excel(file_path, header=0)
-    df.columns = ["Date", "Day of the Week", "Holiday"]
-    df = df[df["Date"].apply(lambda x: isinstance(x, datetime))]
-    df["Date"] = pd.to_datetime(df["Date"])
+def process_holiday_data(df: pd.DataFrame) -> pd.DataFrame:
+    """Process raw holiday data into a structured DataFrame."""
+    df.columns = ['Date', 'Day of the Week', 'Holiday']
+    df = df.loc[df['Date'].apply(lambda x: isinstance(x, datetime))]
+    df.loc[:, 'Date'] = pd.to_datetime(df['Date'])
     return df
 
+def summarize_holidays(df: pd.DataFrame) -> pd.DataFrame:
+    """Create a summary DataFrame with holidays grouped by year."""
+    # Ensure 'Date' column is datetime
+    df = df.copy()  # Avoid modifying the original DataFrame
+    df['Date'] = pd.to_datetime(df['Date'], errors='coerce')  
+    
+    # Create a DataFrame with unique years
+    unique_years = df['Date'].dt.year.unique()
+    df_holiday = pd.DataFrame({'Year': unique_years})
+    
+    # Add days by year
+    year_counts = df['Date'].dt.year.value_counts().to_dict()
+    df_holiday['Days by Year'] = df_holiday['Year'].map(lambda x: year_counts.get(x, 0))
+    
+    # Process each holiday
+    holidays = ['Carnaval', 'Paixão de Cristo', 'Corpus Christi']
+    names = ['Carnival', 'Easter', 'Corpus']
+    for holiday, name in zip(holidays, names):
+        grouped = df.loc[df['Holiday'] == holiday].groupby(df['Date'].dt.year)['Date'].last()
+        df_holiday[name] = df_holiday['Year'].map(grouped)
+    
+    return df_holiday
 
-def create_holiday_summary(df):
-    """Creates a summary DataFrame containing holiday information by year.
+def replace_dates(df: pd.DataFrame, replacements: dict = None) -> pd.DataFrame:
+    """Replace specific holiday dates in the DataFrame."""
+    if replacements:
+        df['Carnival'] = df['Carnival'].replace(replacements)
+    return df
 
-    Args:
-        df (pd.DataFrame): The DataFrame containing cleaned holiday data.
+def filter_holidays_by_year(df: pd.DataFrame, start_date: pd.Timestamp, end_date: pd.Timestamp) -> pd.DataFrame:
+    """Filter holidays by a given year range."""
+    return df[(df['Year'] >= start_date.year) & (df['Year'] <= end_date.year)]
 
-    Returns:
-        pd.DataFrame: A summary DataFrame with holiday details by year.
-    """
-    df_summary = pd.DataFrame(df["Date"].dt.year.unique(), columns=["Year"])
-    df_summary["Days by Year"] = df_summary["Year"].apply(
-        lambda x: df["Date"].dt.year.value_counts().loc[x]
-    )
+def convert_dates_to_r_vector(df: pd.DataFrame, column: str) -> StrVector:
+    valid_dates = df[column].dropna()
+    if valid_dates.empty:
+        raise ValueError(f"The column {column} contains no valid dates.")
+    return StrVector(valid_dates.dt.strftime('%Y-%m-%d').tolist())
 
-    for holiday_name, column_name in [
-        ("Carnaval", "Carnival"),
-        ("Paixão de Cristo", "Easter"),
-        ("Corpus Christi", "Corpus"),
-    ]:
-        df_summary[column_name] = (
-            df.loc[df["Holiday"] == holiday_name, "Date"]
-            .groupby(df["Date"].dt.year)
-            .last()
-            .values
-        )
-
-    # df_summary['Carnival'] = df_summary['Carnival'].replace({
-    #     pd.Timestamp('2022-03-01'): pd.Timestamp('2022-03-02'),
-    #     pd.Timestamp('2003-03-04'): pd.Timestamp('2003-03-05'),
-    #     pd.Timestamp('2014-03-04'): pd.Timestamp('2014-03-05')
-    # })
-
-    return df_summary
-
-
-def filter_holiday_summary(df_summary, start_date, end_date):
-    """Filters the holiday summary DataFrame based on the specified date range.
-
-    Args:
-        df_summary (pd.DataFrame): The summary DataFrame with holiday data.
-        start_date (pd.Timestamp): The start date for the filter.
-        end_date (pd.Timestamp): The end date for the filter.
-
-    Returns:
-        pd.DataFrame: The filtered holiday summary DataFrame.
-    """
-    return df_summary[
-        (df_summary["Year"] >= start_date.year) & (df_summary["Year"] <= end_date.year)
-    ]
-
-
-def load_r_packages():
-    """Loads required R packages using rpy2."""
-    return importr('utils'), importr('base'), importr('seasonal')
-
-def convert_dates_to_r_format(dates, base):
-    """Converts a list of pandas datetime dates to R Date format.
-
-    Args:
-        dates (list): A list of pandas datetime dates.
-        base (R object): The `base` package from R.
-
-    Returns:
-        R object: An R Date vector.
-    """
-    str_dates = dates.dt.strftime('%Y-%m-%d').tolist()
-    r_char_vector = StrVector(str_dates)
-    return base.as_Date(r_char_vector, format="%Y-%m-%d")
-
-def generate_holiday_effects(r_dates, seasonal, start, end=None, frequency=12, center="calendar"):
-    """Generates holiday effects using the seasonal package in R.
-
-    Args:
-        r_dates (R object): R Date vector of holiday dates.
-        seasonal (R object): The `seasonal` package from R.
-        start (int): The start offset for the holiday effect.
-        end (int, optional): The end offset for the holiday effect. Defaults to None.
-        frequency (int, optional): The frequency for the effect. Defaults to 12.
-        center (str, optional): The centering method. Defaults to "calendar".
-
-    Returns:
-        R object: Generated holiday effect.
-    """
-    if end is not None:
-        return seasonal.genhol(r_dates, start=start, end=end, frequency=frequency, center=center)
-    return seasonal.genhol(r_dates, start=start, frequency=frequency, center=center)
-
-def create_holiday_dataframe(df_holiday, base, seasonal):
-    """Creates a Pandas DataFrame with holiday effects for Carnival, Easter, and Corpus.
-
-    Args:
-        df_holiday (pd.DataFrame): DataFrame containing holiday dates.
-        base (R object): The `base` package from R.
-        seasonal (R object): The `seasonal` package from R.
-
-    Returns:
-        pd.DataFrame: DataFrame with holiday effects.
-    """
-    carnival_dates = convert_dates_to_r_format(df_holiday['Carnival'], base)
-    easter_dates = convert_dates_to_r_format(df_holiday['Easter'], base)
-    corpus_dates = convert_dates_to_r_format(df_holiday['Corpus'], base)
-
-    carnival = generate_holiday_effects(carnival_dates, seasonal, start=-4, end=-1)
-    easter = generate_holiday_effects(easter_dates, seasonal, start=-8)
-    corpus = generate_holiday_effects(corpus_dates, seasonal, start=1, end=3)
-
-    return pd.DataFrame({
-        'Carnival': carnival,
-        'Easter': easter,
-        'Corpus': corpus,
-    })
-
-
+def generate_holiday_effects(date_vector, start, end, frequency, center):
+    """Generate holiday effects for seasonal adjustment using R."""
+    if date_vector is None or len(date_vector) == 0:
+        raise ValueError("Date vector is empty or None.")
+    r_dates = base.as_Date(date_vector, format="%Y-%m-%d")
+    return seasonal.genhol(r_dates, start=start, end=end, frequency=frequency, center=center)

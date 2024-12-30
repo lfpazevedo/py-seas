@@ -1,6 +1,23 @@
+# Virtual environment folders
+.venv/
 venv/
+
+# Python cache files
 __pycache__/
 *.pyc
+
+# Log files
 *.log
 
+# Environment files
 .env
+
+# Specific directories to exclude
+src/data/
+src/model/
+src/py_seas.egg-info/
+
+# Specific files to exclude
+main copy.py
+main.py
+Pesos_IBGE_R.R
